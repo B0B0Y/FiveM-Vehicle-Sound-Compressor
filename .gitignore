@@ -1,0 +1,19 @@
+# Ignore input/output contents but keep folders
+input/*
+output/*
+
+# Keep the folders (gitkeep)
+!input/.gitkeep
+!output/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# macOS
+.DS_Store
