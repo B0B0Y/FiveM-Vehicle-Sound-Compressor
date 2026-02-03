@@ -2,6 +2,8 @@
 
 ONE-CLICK workflow: Original Audio → GTA-safe WAV → Ready for AWC
 
+**Batch Mode** - Convert multiple AWC packages at once!
+
 Preserves original `.oac` metadata by copying from input!
 
 ## Output Format (100% GTA V / FiveM / OpenIV Compatible)
@@ -24,12 +26,13 @@ Preserves original `.oac` metadata by copying from input!
 
 1. **Export from OpenIV:**
    - Right-click AWC → Export to openFormats folder
-   - Copy the entire exported folder into `input/`
+   - Copy **all** exported folders into `input/`
+   - You can add multiple AWC packages at once!
 
 2. **Double-click `CONVERT.bat`**
 
 3. **Script automatically:**
-   - Detects AWC name from `.oac` file
+   - Detects ALL AWC packages in input folder
    - Converts WAV files to GTA V format (24,000 Hz, 16-bit, Mono)
    - Validates all files
    - Copies original `.oac` and `.awc` to output
@@ -37,28 +40,45 @@ Preserves original `.oac` metadata by copying from input!
 4. **Import to OpenIV:**
    - Open OpenIV in Edit Mode
    - Go to: Edit → New → Import openFormats
-   - Select the `.oac` file from output folder
-   - Done!
+   - Select `.oac` file from output folder
+   - Repeat for each AWC package
 
-## Input Folder Structure
+## Input Folder Structure (Batch Mode)
+
+Put multiple AWC packages in the input folder:
 
 ```
 input/
-  ├── awcname.oac        ← Original .oac (exported from OpenIV)
-  ├── awcname.awc        ← Original .awc (optional)
-  └── awcname/           ← Subfolder with WAV files
-        ├── ENGINE_ACCEL.wav
-        ├── ENGINE_DECEL.wav
-        └── ...
+  ├── baller3.oac        ← Original .oac
+  ├── baller3.awc        ← Original .awc
+  ├── baller3/           ← WAV files
+  │     └── *.wav
+  ├── mamba.oac
+  ├── mamba.awc
+  ├── mamba/
+  │     └── *.wav
+  ├── schafter3.oac
+  ├── schafter3.awc
+  ├── schafter3/
+  │     └── *.wav
+  └── ...
 ```
 
 ## Output Folder Structure
 
 ```
 output/
-  ├── awcname.oac              ← Copied from input (original metadata)
-  ├── awcname.awc              ← Copied from input
-  ├── awcname/                 ← Converted WAV files
+  ├── baller3.oac              ← Copied from input
+  ├── baller3.awc              ← Copied from input
+  ├── baller3/                 ← Converted WAV files
+  │     └── *.wav
+  ├── mamba.oac
+  ├── mamba.awc
+  ├── mamba/
+  │     └── *.wav
+  ├── schafter3.oac
+  ├── schafter3.awc
+  ├── schafter3/
   │     └── *.wav
   └── _VALIDATION_REPORT.txt
 ```

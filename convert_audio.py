@@ -281,9 +281,86 @@ def generate_validation_report(output_folder, results):
     
     return report_path
 
+def process_single_awc(input_path, output_path, awc_name, sample_rate=24000):
+    """Process a single AWC: convert WAVs, copy .oac and .awc."""
+    
+    # Find matching subfolder with WAV files
+    wav_folder = input_path / awc_name
+    if not wav_folder.exists() or not wav_folder.is_dir():
+        print(f"  [SKIP] No folder found for {awc_name}")
+        return None
+    
+    # Find audio files in the subfolder
+    files = [f for f in wav_folder.glob('*') if f.suffix.lower() in SUPPORTED_EXTENSIONS]
+    if not files:
+        print(f"  [SKIP] No audio files in {awc_name}/")
+        return None
+    
+    # Find .oac and .awc files
+    oac_file = input_path / f"{awc_name}.oac"
+    awc_file = input_path / f"{awc_name}.awc"
+    
+    # Create output subfolder
+    wav_output_path = output_path / awc_name
+    wav_output_path.mkdir(parents=True, exist_ok=True)
+    
+    print(f"\n  [{awc_name}] Converting {len(files)} audio files...")
+    
+    # Stats for this AWC
+    total_input_size = 0
+    total_output_size = 0
+    converted_files = []
+    all_valid = True
+    
+    # Convert files
+    for file in files:
+        input_size = file.stat().st_size
+        total_input_size += input_size
+        
+        out_file = wav_output_path / (file.stem + '.wav')
+        
+        if convert_audio(file, out_file, sample_rate):
+            output_size = out_file.stat().st_size
+            total_output_size += output_size
+            converted_files.append(out_file)
+        else:
+            print(f"    [FAIL] {file.name}")
+    
+    # Validate converted files
+    for wav_file in converted_files:
+        is_valid, issues, info = validate_wav_for_gta(wav_file, sample_rate)
+        if not is_valid:
+            all_valid = False
+    
+    # Copy .oac file
+    if oac_file.exists():
+        dst_oac = output_path / oac_file.name
+        shutil.copy2(oac_file, dst_oac)
+    else:
+        # Generate .oac if no original exists
+        generate_oac_file(output_path, converted_files, awc_name)
+    
+    # Copy .awc file
+    if awc_file.exists():
+        dst_awc = output_path / awc_file.name
+        shutil.copy2(awc_file, dst_awc)
+    
+    status = "OK" if all_valid else "WARN"
+    print(f"  [{status}] {awc_name}: {len(converted_files)} files, "
+          f"{format_size(total_input_size)} -> {format_size(total_output_size)}")
+    
+    return {
+        'awc_name': awc_name,
+        'files_converted': len(converted_files),
+        'input_size': total_input_size,
+        'output_size': total_output_size,
+        'valid': all_valid
+    }
+
+
 def process_files(input_folder, output_folder, sample_rate=24000, recursive=False, 
                   generate_openformats=True, awc_name=None):
-    """Process all audio files with full OpenIV workflow."""
+    """Process all audio files with full OpenIV workflow. Supports batch processing."""
     input_path = Path(input_folder)
     output_path = Path(output_folder)
     
@@ -293,218 +370,114 @@ def process_files(input_folder, output_folder, sample_rate=24000, recursive=Fals
     
     output_path.mkdir(parents=True, exist_ok=True)
     
-    # Auto-detect structure from input folder
-    # Look for .oac and .awc files
+    # Auto-detect all .oac files (each represents one AWC to process)
     oac_files = list(input_path.glob('*.oac'))
-    awc_files = list(input_path.glob('*.awc'))
     
-    # Look for subfolders containing WAV files
+    # Also detect subfolders that might contain audio (even without .oac)
     subfolders = [d for d in input_path.iterdir() if d.is_dir()]
     
-    # Determine AWC name from .oac file or subfolder
-    if awc_name is None:
-        if oac_files:
-            awc_name = oac_files[0].stem
-        elif subfolders:
-            # Use first subfolder that contains audio files
-            for sf in subfolders:
-                audio_in_sf = list(sf.glob('*.wav')) + list(sf.glob('*.mp3'))
-                if audio_in_sf:
-                    awc_name = sf.name
-                    break
-        if awc_name is None:
-            awc_name = output_path.name
+    # Build list of AWC names to process
+    awc_names = set()
     
-    # Find WAV files - first check subfolders, then root
-    files = []
-    wav_source_folder = None
+    # Add AWC names from .oac files
+    for oac in oac_files:
+        awc_names.add(oac.stem)
     
-    # Check if there's a subfolder matching awc_name with audio files
-    awc_subfolder = input_path / awc_name
-    if awc_subfolder.exists() and awc_subfolder.is_dir():
-        files = [f for f in awc_subfolder.glob('*') if f.suffix.lower() in SUPPORTED_EXTENSIONS]
-        wav_source_folder = awc_subfolder
+    # Add AWC names from subfolders that have audio files
+    for sf in subfolders:
+        audio_files = [f for f in sf.glob('*') if f.suffix.lower() in SUPPORTED_EXTENSIONS]
+        if audio_files:
+            awc_names.add(sf.name)
     
-    # If no files found in subfolder, check all subfolders
-    if not files:
-        for sf in subfolders:
-            sf_files = [f for f in sf.glob('*') if f.suffix.lower() in SUPPORTED_EXTENSIONS]
-            if sf_files:
-                files = sf_files
-                wav_source_folder = sf
-                if awc_name is None:
-                    awc_name = sf.name
-                break
+    # If specific awc_name provided, only process that one
+    if awc_name is not None:
+        awc_names = {awc_name}
     
-    # If still no files, check root folder
-    if not files:
-        files = [f for f in input_path.glob('*') if f.suffix.lower() in SUPPORTED_EXTENSIONS]
-        wav_source_folder = input_path
-    
-    if not files:
-        print(f"No audio files found in '{input_folder}'")
-        print(f"Supported formats: {', '.join(SUPPORTED_EXTENSIONS)}")
+    if not awc_names:
+        print(f"No AWC packages found in '{input_folder}'")
+        print("Expected structure: input/awcname.oac + input/awcname/*.wav")
         return
     
-    # Create output subfolder for WAV files
-    wav_output_path = output_path / awc_name
-    wav_output_path.mkdir(parents=True, exist_ok=True)
+    # Sort for consistent ordering
+    awc_names = sorted(awc_names)
     
     print(f"\n{'='*70}")
     print(f"  GTA V / FiveM Audio Converter + OpenIV Workflow")
+    print(f"  BATCH MODE - Processing {len(awc_names)} AWC package(s)")
     print(f"{'='*70}")
     print(f"  Input folder:    {input_folder}")
     print(f"  Output folder:   {output_folder}")
-    print(f"  AWC name:        {awc_name}")
-    print(f"  WAV source:      {wav_source_folder}")
-    print(f"  WAV output:      {wav_output_path}")
     print(f"  Sample rate:     {sample_rate} Hz")
-    if oac_files:
-        print(f"  Original .oac:   {oac_files[0].name} (will copy)")
-    if awc_files:
-        print(f"  Original .awc:   {awc_files[0].name} (will copy)")
-    print(f"  Files found:     {len(files)}")
-    print(f"{'='*70}\n")
+    print(f"  AWC packages:    {', '.join(awc_names)}")
+    print(f"{'='*70}")
     
-    # Stats
-    total_input_size = 0
-    total_output_size = 0
-    converted_files = []
-    validation_results = []
+    # Process each AWC
+    results = []
+    for awc in awc_names:
+        result = process_single_awc(input_path, output_path, awc, sample_rate)
+        if result:
+            results.append(result)
     
-    print("STEP 1: Converting audio files...")
-    print("-" * 70)
+    # Generate combined validation report
+    all_validation_results = []
+    for awc in awc_names:
+        wav_folder = output_path / awc
+        if wav_folder.exists():
+            for wav_file in wav_folder.glob('*.wav'):
+                is_valid, issues, info = validate_wav_for_gta(wav_file, sample_rate)
+                all_validation_results.append({
+                    'file': f"{awc}/{wav_file.name}",
+                    'valid': is_valid,
+                    'issues': issues,
+                    'info': info
+                })
     
-    for i, file in enumerate(files, 1):
-        print(f"[{i}/{len(files)}] {file.name}")
-        
-        input_size = file.stat().st_size
-        total_input_size += input_size
-        
-        # Output path - same filename in output subfolder
-        out_file = wav_output_path / (file.stem + '.wav')
-        
-        # Convert
-        if convert_audio(file, out_file, sample_rate):
-            output_size = out_file.stat().st_size
-            total_output_size += output_size
-            
-            reduction = ((input_size - output_size) / input_size) * 100 if input_size > 0 else 0
-            sign = "-" if reduction > 0 else "+"
-            
-            print(f"    Converted: {format_size(input_size)} -> {format_size(output_size)} ({sign}{abs(reduction):.1f}%)")
-            converted_files.append(out_file)
-        else:
-            print(f"    FAILED to convert!")
-    
-    print()
-    print("STEP 2: Validating converted files...")
-    print("-" * 70)
-    
-    all_valid = True
-    for wav_file in converted_files:
-        is_valid, issues, info = validate_wav_for_gta(wav_file, sample_rate)
-        
-        validation_results.append({
-            'file': wav_file.name,
-            'valid': is_valid,
-            'issues': issues,
-            'info': info
-        })
-        
-        if is_valid:
-            print(f"[OK]   {wav_file.name}")
-            if info:
-                print(f"       {info['sample_rate']}Hz, {'mono' if info['channels']==1 else 'stereo'}, "
-                      f"{info['bit_depth']}bit, {format_duration(info['duration'])}")
-        else:
-            all_valid = False
-            print(f"[FAIL] {wav_file.name}")
-            for issue in issues:
-                print(f"       ! {issue}")
-    
-    # Generate validation report
-    report_path = generate_validation_report(output_path, validation_results)
-    print(f"\nValidation report: {report_path.name}")
-    
-    # Step 3: Copy original .oac and .awc files (instead of generating new ones)
-    print()
-    print("STEP 3: Copying original .oac and .awc files...")
-    print("-" * 70)
-    
-    copied_files = []
-    
-    # Copy .oac file if exists
-    if oac_files:
-        src_oac = oac_files[0]
-        dst_oac = output_path / src_oac.name
-        shutil.copy2(src_oac, dst_oac)
-        print(f"[OK] Copied: {src_oac.name} ({format_size(src_oac.stat().st_size)})")
-        copied_files.append(dst_oac)
-    else:
-        # Generate .oac if no original exists
-        if generate_openformats and converted_files:
-            oac_path = generate_oac_file(output_path, converted_files, awc_name)
-            print(f"[OK] Generated: {oac_path.name} (no original found)")
-            copied_files.append(oac_path)
-    
-    # Copy .awc file if exists
-    if awc_files:
-        src_awc = awc_files[0]
-        dst_awc = output_path / src_awc.name
-        shutil.copy2(src_awc, dst_awc)
-        print(f"[OK] Copied: {src_awc.name} ({format_size(src_awc.stat().st_size)})")
-        copied_files.append(dst_awc)
-    
-    if not oac_files and not awc_files:
-        print("[INFO] No .oac or .awc files found in input folder")
+    report_path = generate_validation_report(output_path, all_validation_results)
     
     # Final Summary
-    print()
-    print("=" * 70)
-    print("  WORKFLOW COMPLETE")
-    print("=" * 70)
-    print(f"  Files converted:   {len(converted_files)}")
-    print(f"  Files validated:   {sum(1 for r in validation_results if r['valid'])}/{len(validation_results)}")
-    print(f"  Total input:       {format_size(total_input_size)}")
-    print(f"  Total output:      {format_size(total_output_size)}")
+    total_files = sum(r['files_converted'] for r in results)
+    total_input = sum(r['input_size'] for r in results)
+    total_output = sum(r['output_size'] for r in results)
+    all_valid = all(r['valid'] for r in results)
     
-    if total_input_size > 0:
-        total_change = ((total_input_size - total_output_size) / total_input_size) * 100
+    print(f"\n{'='*70}")
+    print(f"  BATCH WORKFLOW COMPLETE")
+    print(f"{'='*70}")
+    print(f"  AWC packages:      {len(results)}")
+    print(f"  Total files:       {total_files}")
+    print(f"  Total input:       {format_size(total_input)}")
+    print(f"  Total output:      {format_size(total_output)}")
+    
+    if total_input > 0:
+        total_change = ((total_input - total_output) / total_input) * 100
         if total_change > 0:
-            print(f"  Space saved:       {format_size(total_input_size - total_output_size)} (-{total_change:.1f}%)")
+            print(f"  Space saved:       {format_size(total_input - total_output)} (-{total_change:.1f}%)")
         else:
-            print(f"  Size change:       +{format_size(total_output_size - total_input_size)} (+{abs(total_change):.1f}%)")
+            print(f"  Size change:       +{format_size(total_output - total_input)} (+{abs(total_change):.1f}%)")
     
-    print("=" * 70)
+    print(f"{'='*70}")
     
     if all_valid:
-        print()
-        print("  [SUCCESS] All files are GTA V / FiveM compatible!")
-        print()
-        print("  OUTPUT STRUCTURE:")
-        print(f"  {output_path.name}/")
-        if oac_files:
-            print(f"    +-- {awc_name}.oac           <- Copied from input")
-        if awc_files:
-            print(f"    +-- {awc_name}.awc           <- Copied from input")
-        print(f"    +-- {awc_name}/              <- Converted WAV files")
-        print(f"    |     +-- *.wav")
-        print(f"    +-- _VALIDATION_REPORT.txt")
-        print()
-        print("  IMPORT TO OPENIV:")
-        print("  1. Open OpenIV in Edit Mode")
-        print("  2. Navigate to: Edit -> New -> Import openFormats")
-        print(f"  3. Select the '{awc_name}.oac' file from output folder")
-        print("  4. Done! AWC file will be created automatically")
-        print()
+        print(f"\n  [SUCCESS] All {len(results)} AWC packages converted!")
     else:
-        print()
-        print("  [WARNING] Some files have validation issues!")
+        print(f"\n  [WARNING] Some files have validation issues!")
         print(f"  Check {report_path.name} for details.")
-        print()
     
-    print("=" * 70)
+    print(f"\n  OUTPUT STRUCTURE:")
+    print(f"  {output_path.name}/")
+    for awc in awc_names:
+        print(f"    +-- {awc}.oac")
+        print(f"    +-- {awc}.awc")
+        print(f"    +-- {awc}/")
+        print(f"    |     +-- *.wav")
+    print(f"    +-- _VALIDATION_REPORT.txt")
+    
+    print(f"\n  IMPORT TO OPENIV:")
+    print(f"  1. Open OpenIV in Edit Mode")
+    print(f"  2. Navigate to: Edit -> New -> Import openFormats")
+    print(f"  3. Select ANY .oac file from output folder")
+    print(f"  4. Repeat for each AWC package")
+    print(f"\n{'='*70}")
 
 def main():
     if not check_ffmpeg():
