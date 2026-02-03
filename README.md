@@ -80,17 +80,12 @@ python convert_audio.py --awc-name sultan
 python convert_audio.py -i "C:\sounds" -o "C:\converted"
 ```
 
-## Supported Input Formats
-
-WAV, MP3, OGG, FLAC, AAC, M4A, WMA, OPUS, AIFF
-
 ## Notes
 
 - Original `.oac` is **COPIED**, not generated - preserves all metadata (Headroom, UNKNOWN fields, etc.)
 - File size may INCREASE if original was lower quality - this is REQUIRED for GTA V compatibility
-- **24,000 Hz** - Default, GTA V native sample rate
-- **32,000 Hz** - Higher quality if needed
-- **22,050 Hz** - For small effects (clicks, beeps)
+- This tool outputs **24,000 Hz** by default (GTA V native sample rate)
+- If you *really* need it, you can override sample rate via CLI: `--rate 32000` or `--rate 22050`
 
 ## License
 
